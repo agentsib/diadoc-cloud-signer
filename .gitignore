@@ -1,0 +1,9 @@
+/.idea/
+*.iml
+
+/vendor/
+composer.phar
+
+/config/*
+!/config/config.php
+!/config/config_local.dist.php
