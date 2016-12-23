@@ -1,6 +1,6 @@
 {
-    "name": "agentsib/cloud-signer",
-    "description": "Cloud signer",
+    "name": "agentsib/diadoc-cloud-signer",
+    "description": "Diadoc Cloud signer",
     "type": "project",
     "license": "MIT",
     "authors": [
