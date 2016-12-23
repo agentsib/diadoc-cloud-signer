@@ -3,20 +3,24 @@
 use Silex\Application as SilexApplication;
 use Igorw\Silex\ConfigServiceProvider;
 use Symfony\Component\HttpFoundation\Request;
+use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException;
-use Symfony\Component\Process\ProcessBuilder;
+use AgentSIB\Diadoc\Model\OpensslSignerProvider;
+use AgentSIB\Diadoc\Exception\SignerProviderException;
 
 require __DIR__.'/../vendor/autoload.php';
 
 $app = new SilexApplication();
 
-function getOpensslProcess(array $args = [], $input = null) {
-    global $app;
-    return ProcessBuilder::create($args)
-        ->setPrefix($app['openssl_bin'])
-        ->setInput($input)->getProcess();
+$app['diadoc_signer'] = $app->share(function(SilexApplication $app){
+    return new OpensslSignerProvider(
+        $app['ca_file'],
+        $app['cert_file'],
+        $app['key_file'],
+        $app['openssl_bin']
+    );
+});
 
-}
 
 $app->register(new ConfigServiceProvider(__DIR__.'/../config/config.php'));
 $configFile = __DIR__.'/../config/config_local.php';
@@ -36,72 +40,42 @@ $app->get('/', function(){
 
 $app->post('/sign', function(Request $request) use ($app) {
 
-    $process = getOpensslProcess([
-        'smime',
-        '-sign',
-        '-binary',
-        '-noattr',
-        '-gost89',
-        '-signer', $app['cert_file'],
-        '-inkey', $app['key_file'],
-        '-outform', 'der'
-    ], base64_decode($request->request->get('data')));
+    $result = $app['diadoc_signer']->sign(base64_decode($request->request->get('data')));
 
-    return base64_encode($process->mustRun()->getOutput());
+    return base64_encode($result);
 });
 
 $app->post('/decrypt', function(Request $request) use ($app) {
-    $process = getOpensslProcess([
-        'smime',
-        '-decrypt',
-        '-binary',
-        '-noattr',
-        '-inform', 'der',
-        '-inkey', $app['key_file'],
-    ], base64_decode($request->request->get('data')));
 
-    return base64_encode($process->mustRun()->getOutput());
+    $result = $app['diadoc_signer']->decrypt(base64_decode($request->request->get('data')));
+
+    return base64_encode($result);
 });
 
 $app->post('/encrypt', function(Request $request) use ($app) {
-    $process = getOpensslProcess([
-        'smime',
-        '-encrypt',
-        '-binary',
-        '-noattr',
-        '-outform', 'DER',
-        '-gost89',
-        $app['cert_file']
-    ], base64_decode($request->request->get('data')));
 
-    return base64_encode($process->mustRun()->getOutput());
+    $result = $app['diadoc_signer']->encrypt(base64_decode($request->request->get('data')));
+
+    return base64_encode($result);
 });
 
 $app->post('/checkSign', function(Request $request) use ($app) {
-    $file = tmpfile();
-    $metaDatas = stream_get_meta_data($file);
-    $tmpFilename = $metaDatas['uri'];
-    fwrite($file, base64_decode($request->request->get('data')));
 
-    $process = getOpensslProcess([
-        'smime',
-        '-verify',
-        '-binary',
-        '-noattr',
-        '-gost89',
-        '-inform', 'der',
-        '-CAfile', $app['ca_file'],
-        '-content', $tmpFilename
-    ], base64_decode($request->request->get('sign')));
+    $result = $app['diadoc_signer']->checkSign(
+        base64_decode($request->request->get('data')),
+        base64_decode($request->request->get('sign'))
+    );
 
-    $result = $process->run();
-    fclose($file);
+    return $result?'true':'false';
+});
 
-    return $result === 0?'true':'false';
+$app->error(function (SignerProviderException $e) {
+    return new Response($e->getMessage(), Response::HTTP_BAD_REQUEST);
 });
 
 $app->error(function(\Exception $e){
     return $e->getMessage();
 });
+
 
 $app->run();
